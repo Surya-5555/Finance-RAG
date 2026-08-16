@@ -1,0 +1,15 @@
+langgraph
+langchain-community
+fastapi
+uvicorn
+weaviate-client
+psycopg2-binary
+asyncpg
+sentence-transformers
+pydantic
+python-dotenv
+pyyaml
+ollama
+pypdf
+beautifulsoup4
+lxml
