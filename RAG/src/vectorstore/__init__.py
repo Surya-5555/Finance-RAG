@@ -1,6 +1,6 @@
 """
 Vector store layer for the RAG pipeline.
 """
-from .weaviate_store import WeaviateVectorStore
+from .chroma_store import ChromaDBStore
 
-__all__ = ["WeaviateVectorStore"]
+__all__ = ["ChromaDBStore"]

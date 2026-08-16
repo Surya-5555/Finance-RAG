@@ -1,6 +1,6 @@
 """
-LLM abstract layer and provider implementations.
+LLM layer for generation.
 """
-from .ollama_provider import OllamaProvider
+from .openai_provider import OpenAILLMProvider
 
-__all__ = ["OllamaProvider"]
+__all__ = ["OpenAILLMProvider"]
