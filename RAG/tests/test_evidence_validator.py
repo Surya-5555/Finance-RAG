@@ -1,45 +1,40 @@
 import pytest
 from src.generation.evidence_validator import EvidenceValidator
 
+class MockDocument:
+    def __init__(self, content):
+        self.page_content = content
+
 @pytest.fixture
 def validator():
-    val = EvidenceValidator()
-    # Mock config to avoid reading from disk
-    val.enabled = True
-    val.min_score = 0.50
-    val.min_chunks = 2
-    return val
+    return EvidenceValidator()
 
 def test_evidence_passes(validator):
     contexts = [
-        {"cross_encoder_score": 0.8},
-        {"cross_encoder_score": 0.6},
-        {"cross_encoder_score": 0.2} # Ignored
+        {"document": MockDocument("The revenue was 45 million and net income 1.2 billion.")}
     ]
-    result = validator.validate(contexts)
-    assert result["supported"] is True
+    answer = "The company reported 45 million in revenue and 1.2 billion in income."
+    assert validator.validate_answer(answer, contexts) is True
 
-def test_evidence_fails_due_to_low_score(validator):
+def test_evidence_fails_due_to_missing_number(validator):
     contexts = [
-        {"cross_encoder_score": 0.8},
-        {"cross_encoder_score": 0.3} # Below 0.5 threshold
+        {"document": MockDocument("The revenue was 45 million.")}
     ]
-    result = validator.validate(contexts)
-    assert result["supported"] is False
-    assert "Insufficient supporting evidence" in result["reason"]
+    answer = "The revenue was 45 million, representing a 10% increase."
+    assert validator.validate_answer(answer, contexts) is False
+
+def test_evidence_passes_no_numbers(validator):
+    contexts = [
+        {"document": MockDocument("The company is growing rapidly.")}
+    ]
+    answer = "The company is experiencing rapid growth."
+    assert validator.validate_answer(answer, contexts) is True
 
 def test_evidence_fails_no_chunks(validator):
     contexts = []
-    result = validator.validate(contexts)
-    assert result["supported"] is False
-    assert "No documents retrieved" in result["reason"]
-
-def test_evidence_validator_disabled(validator):
-    validator.enabled = False
-    contexts = [{"cross_encoder_score": 0.1}] # Would normally fail
-    result = validator.validate(contexts)
-    assert result["supported"] is True
+    answer = "Revenue was 45 million."
+    assert validator.validate_answer(answer, contexts) is False
 
 def test_decline_response(validator):
     response = validator.get_decline_response()
-    assert "I don't have enough information" in response
+    assert "not available in the uploaded documents" in response

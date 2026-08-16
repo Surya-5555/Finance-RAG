@@ -13,13 +13,13 @@ from src.rag_engine import RAGEngine
 from src.retrieval.bm25_retriever import BM25Retriever
 from src.retrieval.retriever import VectorRetriever
 from src.retrieval.hybrid_retriever import HybridRetriever
-from src.retrieval.rrf_retriever import RRFRetriever
 from src.retrieval.cross_encoder_reranker import CrossEncoderReranker
 from src.prompt.builder import PromptBuilder
+from src.prompt.prompt_manager import PromptManager
 from src.generation.evidence_validator import EvidenceValidator
-from src.llm.ollama_provider import OllamaProvider
-from src.embeddings.huggingface import HuggingFaceEmbeddingProvider
-from src.vectorstore.weaviate_store import WeaviateVectorStore
+from src.llm.openai_provider import OpenAILLMProvider
+from src.embeddings.openai_provider import OpenAIEmbeddingProvider
+from src.vectorstore.chroma_store import ChromaDBStore
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
@@ -46,7 +46,6 @@ def validate_record(record: dict, index: int, all_ids: set) -> bool:
     if not ref_ans or not str(ref_ans).strip():
         logger.error(f"Row {index} has empty reference_answer.")
         return False
-        
     sources = record["expected_sources"]
     if not isinstance(sources, list):
         logger.error(f"Row {index} 'expected_sources' must be a list.")
@@ -97,48 +96,46 @@ def load_thresholds() -> dict:
 def setup_real_engine():
     """Setup the real RAGEngine using production components."""
     logger.info("Initializing Real RAGEngine Pipeline components...")
-    embed_provider = HuggingFaceEmbeddingProvider()
-    vector_store = WeaviateVectorStore()
+    embed_provider = OpenAIEmbeddingProvider()
+    vector_store = ChromaDBStore("./chroma_db", "finance_docs", embed_provider)
     
+    vector = VectorRetriever(vector_store)
     bm25 = BM25Retriever(vector_store)
-    vector = VectorRetriever(vector_store, embed_provider)
-    hybrid = HybridRetriever(bm25, vector)
-    rrf = RRFRetriever(hybrid)
-    reranker = CrossEncoderReranker(rrf)
+    hybrid = HybridRetriever(vector, bm25)
+    reranker = CrossEncoderReranker(hybrid)
     
-    llm = OllamaProvider()
-    builder = PromptBuilder()
+    llm = OpenAILLMProvider(temperature=0.0)
+    prompt_manager = PromptManager()
+    builder = PromptBuilder(prompt_manager)
     validator = EvidenceValidator()
     
     return RAGEngine(reranker, llm, builder, validator)
 
-def main():
+def run_evaluation_suite():
     dataset_path = Path(__file__).resolve().parent / "golden_dataset.jsonl"
     dataset = load_dataset(str(dataset_path))
     
     if not dataset:
         logger.error("Evaluation aborted: Dataset is empty or missing.")
-        sys.exit(1)
+        return {"error": "Dataset empty or missing"}
         
     logger.info(f"Loaded {len(dataset)} evaluation samples.")
     
     try:
         engine = setup_real_engine()
     except Exception as e:
-        logger.warning(f"Failed to initialize real RAG pipeline (services offline?): {e}")
-        engine = None
+        logger.warning(f"Failed to initialize real RAG pipeline: {e}")
+        return {"error": str(e)}
         
     evaluator = RagasEvaluator()
     thresholds = load_thresholds()
     
     if not evaluator.enabled:
         logger.warning("Evaluation is disabled in config.yaml. Aborting.")
-        sys.exit(0)
+        return {"error": "Evaluation disabled"}
         
     evaluation_inputs = []
-    logger.info("Executing REAL RAGEngine for all questions...")
     
-    # Track statistics
     supported_count = 0
     unsupported_count = 0
     successful_runs = 0
@@ -148,14 +145,8 @@ def main():
         ground_truth = record["reference_answer"]
         
         try:
-            # We explicitly DO NOT mock the answers. We execute the real graph!
             result = engine.ask(question)
             
-            # The context extraction is tricky: engine.retriever might not be directly accessible 
-            # if we wanted internal states, but we can do a secondary retrieve or rely on RAGEngine returning chunks.
-            # Wait, engine.ask returns "sources", not raw contexts text.
-            # But we must supply "contexts" (a list of strings) to RAGAS.
-            # Let's call the real retriever directly just for the text.
             raw_contexts = engine.retriever.retrieve(question)
             retrieved_contexts = [item["document"].page_content for item in raw_contexts]
             
@@ -175,59 +166,31 @@ def main():
                 
         except Exception as e:
             logger.warning(f"RAGEngine execution failed for Q{idx+1} '{question[:30]}...'. Error: {e}")
-            # In CI, if Ollama/Weaviate are entirely offline, this gracefully bypasses.
             
     if successful_runs == 0:
-        logger.warning("All pipeline executions failed! Check if Weaviate and Ollama are running.")
-        logger.warning("Simulating a successful report strictly for CI verification.")
-        metrics = {
-            "faithfulness": 0.94,
-            "answer_relevancy": 0.92,
-            "context_precision": 0.91,
-            "context_recall": 0.95
-        }
-    else:
-        logger.info(f"Executing RAGAS evaluation on {successful_runs} questions...")
-        try:
-            metrics = evaluator.evaluate(evaluation_inputs)
-        except Exception as e:
-            logger.warning(f"RAGAS evaluation failed (missing OpenAI key?). Simulating metrics. Error: {e}")
-            metrics = {
-                "faithfulness": 0.94,
-                "answer_relevancy": 0.92,
-                "context_precision": 0.91,
-                "context_recall": 0.95
-            }
-            
-    # Calculate stats
-    total_q = len(dataset)
-    print("\n================================================")
-    print("Evaluation Summary")
-    print(f"\nTotal Questions: {total_q}")
-    print(f"Evaluated Successfully: {successful_runs}")
-    if successful_runs > 0:
-        print(f"Supported (Answered): {supported_count}")
-        print(f"Unsupported (Declined): {unsupported_count}\n")
-    
+        logger.warning("All pipeline executions failed!")
+        return {"error": "All executions failed"}
+        
+    try:
+        metrics = evaluator.evaluate(evaluation_inputs)
+    except Exception as e:
+        logger.warning(f"RAGAS evaluation failed: {e}")
+        return {"error": str(e)}
+        
     overall_pass = True
-    
     for metric_name, score in metrics.items():
-        clean_name = metric_name.replace("_", " ").title()
         threshold = thresholds.get(metric_name, 0.0)
         passed = score >= threshold
         if not passed:
             overall_pass = False
             
-        print(f"{clean_name}: {score:.2f}")
-        print(f"Threshold: {threshold:.2f}")
-        print("PASS\n" if passed else "FAIL\n")
-        
-    print("Overall:")
-    print("PASS" if overall_pass else "FAIL")
-    print("================================================")
+    metrics["overall_pass"] = overall_pass
+    metrics["supported_count"] = supported_count
+    metrics["unsupported_count"] = unsupported_count
+    metrics["total"] = successful_runs
     
-    if not overall_pass:
-        sys.exit(1)
-        
+    return metrics
+
 if __name__ == "__main__":
-    main()
+    result = run_evaluation_suite()
+    print(json.dumps(result, indent=2))

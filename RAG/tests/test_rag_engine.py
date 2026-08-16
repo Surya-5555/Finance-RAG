@@ -22,11 +22,8 @@ class MockPromptBuilder:
 class MockEvidenceValidator:
     def __init__(self, supported):
         self._supported = supported
-    def validate(self, contexts):
-        if self._supported:
-            return {"supported": True}
-        else:
-            return {"supported": False, "reason": "Insufficient"}
+    def validate_answer(self, answer, contexts):
+        return self._supported
     def get_decline_response(self):
         return "Declined."
 
