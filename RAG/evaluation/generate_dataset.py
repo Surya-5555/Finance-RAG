@@ -1,0 +1,315 @@
+import json
+import os
+
+DATASET = [
+    {
+        "id": "q001",
+        "question": "What is the problem statement for the RAG system?",
+        "reference_answer": "The system aims to build a production-grade RAG system that ingests content, chunks it into 500-800 tokens, stores it in Weaviate, retrieves relevant chunks, generates citations, and declines to answer if chunks do not support the response.",
+        "expected_sources": [{"source": "docs/PROJECT_CONTEXT.md", "page": None}]
+    },
+    {
+        "id": "q002",
+        "question": "What orchestrator is used?",
+        "reference_answer": "LangGraph is used for orchestration.",
+        "expected_sources": [{"source": "docs/PROJECT_CONTEXT.md", "page": None}]
+    },
+    {
+        "id": "q003",
+        "question": "Why is LangGraph preferred over LangChain chains?",
+        "reference_answer": "RAG is a stateful decision loop, not a linear pipeline. Retry logic, citation enforcement, and conditional re-retrieval require a graph architecture.",
+        "expected_sources": [{"source": "docs/PROJECT_CONTEXT.md", "page": None}]
+    },
+    {
+        "id": "q004",
+        "question": "What vector database is used?",
+        "reference_answer": "Weaviate is used as the local vector database via Docker.",
+        "expected_sources": [{"source": "docs/PROJECT_CONTEXT.md", "page": None}]
+    },
+    {
+        "id": "q005",
+        "question": "What chunk size and overlap are configured?",
+        "reference_answer": "Documents are chunked into 500 to 800 tokens with a 100 token overlap.",
+        "expected_sources": [{"source": "docs/PROJECT_CONTEXT.md", "page": None}]
+    },
+    {
+        "id": "q006",
+        "question": "Which embedding model is used in production?",
+        "reference_answer": "BAAI/bge-base-en-v1.5 is used for production.",
+        "expected_sources": [{"source": "docs/PROJECT_CONTEXT.md", "page": None}]
+    },
+    {
+        "id": "q007",
+        "question": "Which embedding model is used in development?",
+        "reference_answer": "BAAI/bge-small-en-v1.5 is used for development.",
+        "expected_sources": [{"source": "docs/PROJECT_CONTEXT.md", "page": None}]
+    },
+    {
+        "id": "q008",
+        "question": "What is the hybrid retrieval strategy?",
+        "reference_answer": "The system uses BM25 for keyword retrieval and BGE embeddings for semantic vector search.",
+        "expected_sources": [{"source": "docs/PROJECT_CONTEXT.md", "page": None}]
+    },
+    {
+        "id": "q009",
+        "question": "How are BM25 and vector search results combined?",
+        "reference_answer": "They are combined using RRF (Reciprocal Rank Fusion) which merges both ranked lists with zero tuning.",
+        "expected_sources": [{"source": "docs/PROJECT_CONTEXT.md", "page": None}]
+    },
+    {
+        "id": "q010",
+        "question": "What cross-encoder model is used for reranking by default?",
+        "reference_answer": "BAAI/bge-reranker-base is used by default.",
+        "expected_sources": [{"source": "docs/PROJECT_CONTEXT.md", "page": None}]
+    },
+    {
+        "id": "q011",
+        "question": "Why use a cross-encoder reranker if we already have bi-encoders?",
+        "reference_answer": "Cross-encoders score the query and chunk together, giving much higher precision at the cost of slight latency, whereas bi-encoders score them independently.",
+        "expected_sources": [{"source": "docs/PROJECT_CONTEXT.md", "page": None}]
+    },
+    {
+        "id": "q012",
+        "question": "What happens if retrieved chunks do not support the query?",
+        "reference_answer": "The citation enforcement node explicitly declines to answer to prevent hallucination.",
+        "expected_sources": [{"source": "docs/PROJECT_CONTEXT.md", "page": None}]
+    },
+    {
+        "id": "q013",
+        "question": "Where are prompts stored and managed?",
+        "reference_answer": "Prompts are managed as versioned YAML config files in the prompts/config directory.",
+        "expected_sources": [{"source": "docs/PROJECT_CONTEXT.md", "page": None}]
+    },
+    {
+        "id": "q014",
+        "question": "Why are prompts stored in versioned YAML files?",
+        "reference_answer": "Prompts are considered part of the system architecture and must be diffable, reviewable, and rollback-able in git.",
+        "expected_sources": [{"source": "docs/PROJECT_CONTEXT.md", "page": None}]
+    },
+    {
+        "id": "q015",
+        "question": "Which files control hyperparameters and feature flags?",
+        "reference_answer": "config.yaml controls hyperparameters and flags.yaml controls feature flags for A/B testing components.",
+        "expected_sources": [{"source": "docs/PROJECT_CONTEXT.md", "page": None}]
+    },
+    {
+        "id": "q016",
+        "question": "How is the LLM interface layer abstracted?",
+        "reference_answer": "The retrieval pipeline calls llm.generate(prompt) through a BaseLLMAdapter, allowing seamless swapping of providers like Ollama, OpenAI, or Claude via configuration.",
+        "expected_sources": [{"source": "docs/PROJECT_CONTEXT.md", "page": None}, {"source": "docs/AGENT_INSTRUCTIONS.md", "page": None}]
+    },
+    {
+        "id": "q017",
+        "question": "What is the purpose of the RAGAS evaluation in Phase 3?",
+        "reference_answer": "To measure Faithfulness, Answer Relevancy, Context Precision, and Context Recall against a golden dataset of manually verified QA pairs.",
+        "expected_sources": [{"source": "docs/PROJECT_CONTEXT.md", "page": None}]
+    },
+    {
+        "id": "q018",
+        "question": "How does RAGAS evaluation integrate with CI/CD?",
+        "reference_answer": "It is wired into the CI pipeline via GitHub Actions, where every PR automatically triggers an evaluation run, failing the build if quality drops below the faithfulness threshold.",
+        "expected_sources": [{"source": "docs/PROJECT_CONTEXT.md", "page": None}]
+    },
+    {
+        "id": "q019",
+        "question": "What role does PostgreSQL play in the stack?",
+        "reference_answer": "PostgreSQL is used for storage of metadata, sessions, and audit logs.",
+        "expected_sources": [{"source": "docs/PROJECT_CONTEXT.md", "page": None}]
+    },
+    {
+        "id": "q020",
+        "question": "Is an OpenAI API key required for the core pipeline?",
+        "reference_answer": "No, the core pipeline does not require OpenAI API keys; LLMs are served via local Ollama models.",
+        "expected_sources": [{"source": "docs/PROJECT_CONTEXT.md", "page": None}]
+    },
+    {
+        "id": "q021",
+        "question": "What are the hardware constraints of the project?",
+        "reference_answer": "It must run locally on Windows with 16GB RAM and an RTX 3050 with 4GB VRAM.",
+        "expected_sources": [{"source": "docs/PROJECT_CONTEXT.md", "page": None}]
+    },
+    {
+        "id": "q022",
+        "question": "What must be done when modifying code inside a service folder?",
+        "reference_answer": "You must create or update a README.md inside that exact same service folder explaining what the module does.",
+        "expected_sources": [{"source": "docs/AGENT_INSTRUCTIONS.md", "page": None}]
+    },
+    {
+        "id": "q023",
+        "question": "Can I write documentation outside the service folder being modified?",
+        "reference_answer": "No, you must never create documentation files anywhere else in the repo as a side effect of modifying a service.",
+        "expected_sources": [{"source": "docs/AGENT_INSTRUCTIONS.md", "page": None}]
+    },
+    {
+        "id": "q024",
+        "question": "What tone is required for writing READMEs?",
+        "reference_answer": "Write in simple, clear English with no emojis, marketing language, or filler words. Keep it short and to the point.",
+        "expected_sources": [{"source": "docs/AGENT_INSTRUCTIONS.md", "page": None}]
+    },
+    {
+        "id": "q025",
+        "question": "Are LangGraph nodes allowed to pass raw dictionaries?",
+        "reference_answer": "No, every node must read from and write to a typed StateGraph state object.",
+        "expected_sources": [{"source": "docs/AGENT_INSTRUCTIONS.md", "page": None}]
+    },
+    {
+        "id": "q026",
+        "question": "What should the citation enforcement node do if information is borderline?",
+        "reference_answer": "It should route back to retrieval with a broader query for a maximum of 2 retries tracked in the state.",
+        "expected_sources": [{"source": "docs/AGENT_INSTRUCTIONS.md", "page": None}]
+    },
+    {
+        "id": "q027",
+        "question": "Are FastAPI endpoints synchronous or asynchronous?",
+        "reference_answer": "Every FastAPI endpoint must be async, with streaming responses required for the generate endpoint.",
+        "expected_sources": [{"source": "docs/AGENT_INSTRUCTIONS.md", "page": None}]
+    },
+    {
+        "id": "q028",
+        "question": "What services must Docker Compose bring up?",
+        "reference_answer": "FastAPI, Weaviate, PostgreSQL, Langfuse, Prometheus, and Grafana.",
+        "expected_sources": [{"source": "docs/AGENT_INSTRUCTIONS.md", "page": None}]
+    },
+    {
+        "id": "q029",
+        "question": "What is the single source of truth for the faithfulness threshold?",
+        "reference_answer": "The config.yaml file.",
+        "expected_sources": [{"source": "docs/AGENT_INSTRUCTIONS.md", "page": None}]
+    },
+    {
+        "id": "q030",
+        "question": "How should feature flags be evaluated?",
+        "reference_answer": "Each flag must be checked at runtime so the pipeline can run with any combination disabled for A/B testing.",
+        "expected_sources": [{"source": "docs/AGENT_INSTRUCTIONS.md", "page": None}]
+    },
+    {
+        "id": "q031",
+        "question": "What happens if a PR fails the faithfulness threshold?",
+        "reference_answer": "The GitHub Actions workflow fails and blocks the PR.",
+        "expected_sources": [{"source": "docs/AGENT_INSTRUCTIONS.md", "page": None}]
+    },
+    {
+        "id": "q032",
+        "question": "Can I call the Ollama API directly from a LangGraph node?",
+        "reference_answer": "No, graph nodes must only call BaseLLMAdapter.generate(). Never call a provider SDK directly.",
+        "expected_sources": [{"source": "docs/AGENT_INSTRUCTIONS.md", "page": None}]
+    },
+    {
+        "id": "q033",
+        "question": "What is the default re-ranker model if VRAM is low?",
+        "reference_answer": "BAAI/bge-reranker-base is used by default.",
+        "expected_sources": [{"source": "docs/PROJECT_CONTEXT.md", "page": None}]
+    },
+    {
+        "id": "q034",
+        "question": "How is metrics visualization handled in the architecture?",
+        "reference_answer": "Metrics are collected by Prometheus and visualized using Grafana dashboards.",
+        "expected_sources": [{"source": "docs/PROJECT_CONTEXT.md", "page": None}]
+    },
+    {
+        "id": "q035",
+        "question": "What is Langfuse used for?",
+        "reference_answer": "Langfuse is used for tracing.",
+        "expected_sources": [{"source": "docs/PROJECT_CONTEXT.md", "page": None}]
+    },
+    {
+        "id": "q036",
+        "question": "What handles application logging?",
+        "reference_answer": "OpenTelemetry is used for application logging.",
+        "expected_sources": [{"source": "docs/PROJECT_CONTEXT.md", "page": None}]
+    },
+    {
+        "id": "q037",
+        "question": "How do you swap from Ollama to Gemini in this project?",
+        "reference_answer": "By making a configuration change, since the LLM interface layer uses adapters to seamlessly switch providers without changing code.",
+        "expected_sources": [{"source": "docs/PROJECT_CONTEXT.md", "page": None}]
+    },
+    {
+        "id": "q038",
+        "question": "What budget is allocated for this project?",
+        "reference_answer": "Zero spend. The project must be fully free and open source.",
+        "expected_sources": [{"source": "docs/PROJECT_CONTEXT.md", "page": None}]
+    },
+    {
+        "id": "q039",
+        "question": "How is metadata stored?",
+        "reference_answer": "Metadata is stored in PostgreSQL.",
+        "expected_sources": [{"source": "docs/PROJECT_CONTEXT.md", "page": None}]
+    },
+    {
+        "id": "q040",
+        "question": "Is Kubernetes used right now?",
+        "reference_answer": "No, Docker Compose is currently used for containers, while Kubernetes is planned for the future.",
+        "expected_sources": [{"source": "docs/PROJECT_CONTEXT.md", "page": None}]
+    },
+    {
+        "id": "q041",
+        "question": "What framework is used for the backend?",
+        "reference_answer": "FastAPI is the framework used for the backend.",
+        "expected_sources": [{"source": "docs/PROJECT_CONTEXT.md", "page": None}]
+    },
+    {
+        "id": "q042",
+        "question": "What is the expected behavior if I ask about setting up a Redis cache?",
+        "reference_answer": "I cannot answer this question based on the provided documents.",
+        "expected_sources": []
+    },
+    {
+        "id": "q043",
+        "question": "How do I configure the Pinecone vector database?",
+        "reference_answer": "I cannot answer this question based on the provided documents.",
+        "expected_sources": []
+    },
+    {
+        "id": "q044",
+        "question": "What are the rules for deploying to AWS Lambda?",
+        "reference_answer": "I cannot answer this question based on the provided documents.",
+        "expected_sources": []
+    },
+    {
+        "id": "q045",
+        "question": "Explain the integration with Datadog.",
+        "reference_answer": "I cannot answer this question based on the provided documents.",
+        "expected_sources": []
+    },
+    {
+        "id": "q046",
+        "question": "How is the React frontend architected?",
+        "reference_answer": "I cannot answer this question based on the provided documents.",
+        "expected_sources": []
+    },
+    {
+        "id": "q047",
+        "question": "What is the hybrid retrieval strategy and how are the results combined?",
+        "reference_answer": "The hybrid strategy uses BM25 for keyword retrieval and BGE embeddings for semantic search. The results are merged using Reciprocal Rank Fusion (RRF).",
+        "expected_sources": [{"source": "docs/PROJECT_CONTEXT.md", "page": None}]
+    },
+    {
+        "id": "q048",
+        "question": "Compare the bi-encoder and cross-encoder approaches used in this system.",
+        "reference_answer": "Bi-encoders score queries and chunks independently during retrieval, while cross-encoders evaluate them together for higher precision reranking, at the cost of slightly higher latency.",
+        "expected_sources": [{"source": "docs/PROJECT_CONTEXT.md", "page": None}]
+    },
+    {
+        "id": "q049",
+        "question": "Which databases are utilized in the architecture and what are their specific roles?",
+        "reference_answer": "Weaviate is used as the vector database for storing embeddings and chunks, while PostgreSQL is used to store metadata, sessions, and audit logs.",
+        "expected_sources": [{"source": "docs/PROJECT_CONTEXT.md", "page": None}]
+    },
+    {
+        "id": "q050",
+        "question": "What is the exact process for adding documentation when editing a service?",
+        "reference_answer": "You must create or update a README.md exclusively inside the modified service folder, explaining what the module does in simple English, and you must never leave outdated descriptions.",
+        "expected_sources": [{"source": "docs/AGENT_INSTRUCTIONS.md", "page": None}]
+    }
+]
+
+def main():
+    os.makedirs("evaluation", exist_ok=True)
+    with open("evaluation/golden_dataset.jsonl", "w", encoding="utf-8") as f:
+        for item in DATASET:
+            f.write(json.dumps(item) + "\n")
+    print(f"Generated {len(DATASET)} Golden QA pairs in evaluation/golden_dataset.jsonl")
+
+if __name__ == "__main__":
+    main()
