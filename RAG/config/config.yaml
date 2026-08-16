@@ -1,0 +1,36 @@
+embedding_model: "BAAI/bge-small-en-v1.5" # Switch to BAAI/bge-base-en-v1.5 in production
+reranker_model: "BAAI/bge-reranker-base" # Switch to large if VRAM allows
+vector_top_k: 10
+bm25_top_k: 10
+rrf:
+  enabled: true
+  k: 60
+cross_encoder:
+  enabled: true
+  model: "cross-encoder/ms-marco-MiniLM-L-6-v2"
+  top_n: 5
+citation:
+  enabled: true
+  minimum_cross_encoder_score: 0.50
+  minimum_chunks: 2
+prompt:
+  version: "rag_answer_v1"
+faithfulness_threshold: 0.85
+chunking:
+  chunk_size: 500
+  chunk_overlap: 100
+collection_name: "RagDocuments"
+llm_provider: "ollama"
+temperature: 0.0
+evaluation:
+  enabled: true
+  metrics:
+    - faithfulness
+    - answer_relevancy
+    - context_precision
+    - context_recall
+  threshold:
+    faithfulness: 0.90
+    answer_relevancy: 0.90
+    context_precision: 0.90
+    context_recall: 0.90

@@ -1,0 +1,3 @@
+use_reranker: true
+use_hybrid_search: true
+use_citation_enforcement: true
