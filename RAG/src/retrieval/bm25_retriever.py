@@ -1,75 +1,73 @@
-"""
-BM25 retrieval implementation for the RAG pipeline.
-"""
-import yaml
 import time
 import logging
-from pathlib import Path
-from typing import Any
-from src.vectorstore.weaviate_store import WeaviateVectorStore
-from src.retrieval.base import BaseRetriever
+from typing import Any, List, Dict
+from rank_bm25 import BM25Okapi
+from src.vectorstore.chroma_store import ChromaDBStore
 
 logger = logging.getLogger(__name__)
 
-class BM25Retriever(BaseRetriever):
+class BM25Retriever:
     """
-    Orchestrates the retrieval of documents using BM25 keyword search.
+    BM25 keyword search retriever.
+    Builds the BM25 index in-memory from the persisted ChromaDB store.
     """
 
-    def __init__(self, vector_store: WeaviateVectorStore) -> None:
-        """
-        Initialize the BM25Retriever.
-
-        Args:
-            vector_store (WeaviateVectorStore): The vector store instance which supports keyword search.
-        """
+    def __init__(self, vector_store: ChromaDBStore, top_k: int = 10):
         self.vector_store = vector_store
-        self.bm25_top_k = self._load_bm25_top_k()
+        self.top_k = top_k
+        self.bm25 = None
+        self.documents = []
+        self._build_index()
 
-    def _load_bm25_top_k(self) -> int:
-        """
-        Load the BM25 retrieval limit (bm25_top_k) from the config.yaml file.
-        
-        Returns:
-            int: The maximum number of documents to retrieve.
-        """
-        config_path = Path(__file__).resolve().parent.parent.parent / "config" / "config.yaml"
-        if not config_path.exists():
-            return 10
-            
-        with open(config_path, "r", encoding="utf-8") as file:
-            config = yaml.safe_load(file)
-            
-        bm25_top_k = config.get("bm25_top_k", 10)
-        
-        if not isinstance(bm25_top_k, int) or bm25_top_k <= 0:
-            raise ValueError("bm25_top_k in config must be a positive integer.")
-            
-        return bm25_top_k
+    def _build_index(self):
+        """Fetch all documents from Chroma and build BM25 index."""
+        logger.info("Building BM25 index from ChromaDB...")
+        results = self.vector_store.collection.get()
+        if not results or not results['documents']:
+            logger.info("No documents found in ChromaDB for BM25.")
+            return
 
-    def retrieve(self, query: str) -> list[dict[str, Any]]:
-        """
-        Retrieve relevant documents for a given query using BM25 keyword search.
-
-        Args:
-            query (str): The search query string.
-
-        Returns:
-            list[dict[str, Any]]: A list of dictionaries containing retrieved chunks, metadata, and BM25 scores.
+        self.documents = []
+        tokenized_corpus = []
+        for i in range(len(results['documents'])):
+            text = results['documents'][i]
+            meta = results['metadatas'][i]
             
-        Raises:
-            ValueError: If the query is empty or not a string.
+            self.documents.append({
+                "document": type("Doc", (), {"page_content": text, "metadata": meta})(),
+            })
+            tokenized_corpus.append(text.lower().split())
+
+        self.bm25 = BM25Okapi(tokenized_corpus)
+        logger.info(f"BM25 index built with {len(self.documents)} documents.")
+
+    def retrieve(self, query: str) -> List[Dict[str, Any]]:
         """
-        if not isinstance(query, str) or not query.strip():
-            raise ValueError("Query must be a non-empty string.")
+        Retrieve relevant documents using BM25 keyword search.
+        """
+        if not self.bm25:
+            # Try to build again if it was empty
+            self._build_index()
+            if not self.bm25:
+                return []
 
         start_time = time.time()
-
-        # Perform BM25 keyword search
-        results = self.vector_store.keyword_search(query=query, limit=self.bm25_top_k)
+        tokenized_query = query.lower().split()
         
+        # Get scores
+        scores = self.bm25.get_scores(tokenized_query)
+        
+        # Sort indices by score
+        top_indices = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)[:self.top_k]
+        
+        results = []
+        for idx in top_indices:
+            if scores[idx] > 0: # Only return if there's some overlap
+                doc_dict = self.documents[idx].copy()
+                doc_dict["bm25_score"] = float(scores[idx])
+                results.append(doc_dict)
+
         execution_time = time.time() - start_time
         logger.info(f"BM25 retrieval completed in {execution_time:.3f}s. Retrieved {len(results)} chunks.")
 
-        # Return retrieved chunks in normalized format
         return results
